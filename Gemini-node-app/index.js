@@ -1,4 +1,4 @@
-// Import required dependencies
+
 require("dotenv").config();
 const Groq = require("groq-sdk");
 const readline = require("readline");
@@ -121,5 +121,5 @@ async function run() {
   }
 }
 
-// Call the run function
+
 run();
