@@ -80,23 +80,91 @@ GROQ_API_KEY=your_api_key_here
 node index.js
 ```
 
-## 🤖 Zero-Shot Prompting
+## 🤖 Multi-Shot vs Zero-Shot Prompting
 
-Zero-shot prompting is a technique where the AI model can understand and perform tasks without any specific training examples. Our implementation uses this approach to:
+### Multi-Shot Prompting
 
-1. **Understand Context**: The model comprehends queries without predefined patterns
-2. **Generate Responses**: Produces accurate answers without task-specific training
-3. **Adapt to Various Topics**: Handles different subjects without additional configuration
+Multi-shot prompting is an advanced technique where we provide the AI model with example conversations before asking our actual question. This approach: 
 
-### Example Prompts
+1. **Learning by Example**: The model learns from user-provided examples of good Q&A pairs
+2. **Consistent Format**: Helps maintain consistent response patterns and styles
+3. **Context Training**: Improves accuracy by showing the model exactly what we want
+4. **Dynamic Learning**: Users can input their own examples for custom response patterns
 
-1. **Concept Explanation**:
+Example Structure:
+
+```javascript
+[
+  { role: "user", content: "What are the best places in Paris?" },
+  {
+    role: "assistant",
+    content: "The top attractions include Eiffel Tower, Louvre...",
+  },
+  // More examples...
+  { role: "user", content: "Your actual question" },
+];
+```
+
+### Zero-Shot Prompting
+
+Zero-shot prompting is when the model handles queries without any examples. This approach:
+
+1. **Direct Questioning**: Model responds based on its pre-trained knowledge
+2. **Flexible Responses**: No format constraints from examples
+3. **Quicker Setup**: No need to provide examples before asking questions
+
+### Implementation Details
+
+Our implementation supports both multi-shot and zero-shot prompting:
+
+1. **Interactive Example Collection**:
+
+```javascript
+async function getExamples() {
+  const examples = [];
+  while (true) {
+    // Get example Q&A pairs from user
+    const userPrompt = await rl.question("Enter an example question: ");
+    if (userPrompt === "done") break;
+    const assistantResponse = await rl.question(
+      "Enter the expected response: "
+    );
+    examples.push(
+      { role: "user", content: userPrompt },
+      { role: "assistant", content: assistantResponse }
+    );
+  }
+  return examples;
+}
+```
+
+2. **Dynamic Prompt Handling**:
+
+```javascript
+const completion = await groq.chat.completions.create({
+  messages: [...examples, { role: "user", content: prompt }],
+  model: "llama3-8b-8192",
+  temperature: 0.7,
+  top_p: 0.9,
+  max_tokens: 1024,
+});
+```
+
+### Example Use Cases
+
+1. **Educational Tutorials**:
 
 ```
-Explain the concept of recursion in programming using a real-world example
+User Example 1: "What is a variable in programming?"
+Assistant Example 1: "A variable is a container that stores data values..."
+
+User Example 2: "Explain arrays in simple terms"
+Assistant Example 2: "An array is like a list that can hold multiple items..."
+
+Actual Question: "What is a function in programming?"
 ```
 
-2. **Code Review**:
+2. **Technical Documentation**:
 
 ```
 Review this code snippet for best practices and potential improvements:
@@ -117,12 +185,21 @@ How would you implement a binary search tree in JavaScript?
 
 ## 🔍 Performance Metrics
 
-Our implementation includes:
+Our implementation includes comprehensive monitoring for both multi-shot and zero-shot approaches:
+
+### Multi-Shot Metrics
+
+- **Example Impact**: Measures how examples influence response quality
+- **Context Length**: Monitors total tokens used by examples + prompt
+- **Learning Efficiency**: Tracks improvement in responses with more examples
+
+### General Metrics
 
 - **Response Time Tracking**: Measures API response time for each query
 - **Token Usage Monitoring**: Tracks token consumption for optimization
 - **Error Handling**: Robust error management for reliable operation
 - **Input Validation**: Ensures prompts meet quality standards
+- **Example Management**: Validates and optimizes example conversations
 
 ### Current Performance
 
