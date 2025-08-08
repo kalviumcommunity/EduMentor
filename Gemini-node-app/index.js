@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 const Groq = require("groq-sdk");
 const readline = require("readline");
@@ -30,14 +29,44 @@ function validatePrompt(prompt) {
   return prompt.trim();
 }
 
+// Function to get example conversations from user
+async function getExamples() {
+  const examples = [];
+  console.log(
+    "\nLet's set up some example conversations for multi-shot prompting."
+  );
+  console.log("Enter 'done' when you've finished adding examples.\n");
+
+  while (true) {
+    // Get user query
+    const userPrompt = await new Promise((resolve) => {
+      rl.question("Enter an example question (or 'done' to finish): ", resolve);
+    });
+
+    if (userPrompt.toLowerCase() === "done") break;
+
+    // Get expected response
+    const assistantResponse = await new Promise((resolve) => {
+      rl.question("Enter the expected response: ", resolve);
+    });
+
+    examples.push(
+      { role: "user", content: userPrompt },
+      { role: "assistant", content: assistantResponse }
+    );
+  }
+
+  return examples;
+}
+
 // Handle API response and measure performance
-async function handleApiRequest(prompt) {
+async function handleApiRequest(prompt, examples) {
   const startTime = process.hrtime();
 
   try {
-    // Generate content using Groq
+    // Generate content using Groq with multi-shot prompting
     const completion = await groq.chat.completions.create({
-      messages: [{ role: "user", content: prompt }],
+      messages: [...examples, { role: "user", content: prompt }],
       model: "llama3-8b-8192",
       temperature: 0.7,
       top_p: 0.9,
@@ -70,6 +99,10 @@ async function run() {
     let totalRequests = 0;
     let totalResponseTime = 0;
 
+    // Get examples from user first
+    const examples = await getExamples();
+    console.log("\nExample conversations set up successfully!");
+
     while (true) {
       // Get prompt from user
       const prompt = await new Promise((resolve) => {
@@ -98,7 +131,7 @@ async function run() {
         console.log("\nGenerating response...");
 
         // Make API request and measure performance
-        const result = await handleApiRequest(validatedPrompt);
+        const result = await handleApiRequest(validatedPrompt, examples);
 
         if (result.success) {
           console.log("\nResponse:", result.data);
@@ -120,6 +153,5 @@ async function run() {
     rl.close();
   }
 }
-
 
 run();
