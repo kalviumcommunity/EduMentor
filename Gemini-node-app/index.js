@@ -1,4 +1,5 @@
 require("dotenv").config();
+const { Console } = require("console");
 const Groq = require("groq-sdk");
 const readline = require("readline");
 
@@ -10,6 +11,8 @@ const rl = readline.createInterface({
 
 // Check if the API key is available
 if (!process.env.GROQ_API_KEY) {
+  console.log(process.env.GROQ_API_KEY);
+
   throw new Error("GROQ_API_KEY is not set in the .env file");
 }
 
