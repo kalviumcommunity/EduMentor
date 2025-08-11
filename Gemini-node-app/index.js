@@ -1,5 +1,4 @@
 require("dotenv").config();
-const { Console } = require("console");
 const Groq = require("groq-sdk");
 const readline = require("readline");
 
@@ -11,8 +10,6 @@ const rl = readline.createInterface({
 
 // Check if the API key is available
 if (!process.env.GROQ_API_KEY) {
-  console.log(process.env.GROQ_API_KEY);
-
   throw new Error("GROQ_API_KEY is not set in the .env file");
 }
 
@@ -21,7 +18,7 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// Validate the prompt
+// Validate prompt
 function validatePrompt(prompt) {
   if (!prompt || prompt.trim().length === 0) {
     throw new Error("Prompt cannot be empty");
@@ -32,44 +29,16 @@ function validatePrompt(prompt) {
   return prompt.trim();
 }
 
-// Function to get example conversations from user
-async function getExamples() {
-  const examples = [];
-  console.log(
-    "\nLet's set up some example conversations for multi-shot prompting."
-  );
-  console.log("Enter 'done' when you've finished adding examples.\n");
+// Store conversation dynamically
+const conversationHistory = [];
 
-  while (true) {
-    // Get user query
-    const userPrompt = await new Promise((resolve) => {
-      rl.question("Enter an example question (or 'done' to finish): ", resolve);
-    });
-
-    if (userPrompt.toLowerCase() === "done") break;
-
-    // Get expected response
-    const assistantResponse = await new Promise((resolve) => {
-      rl.question("Enter the expected response: ", resolve);
-    });
-
-    examples.push(
-      { role: "user", content: userPrompt },
-      { role: "assistant", content: assistantResponse }
-    );
-  }
-
-  return examples;
-}
-
-// Handle API response and measure performance
-async function handleApiRequest(prompt, examples) {
+// Function to handle API request
+async function handleApiRequest(prompt) {
   const startTime = process.hrtime();
 
   try {
-    // Generate content using Groq with multi-shot prompting
     const completion = await groq.chat.completions.create({
-      messages: [...examples, { role: "user", content: prompt }],
+      messages: [...conversationHistory, { role: "user", content: prompt }],
       model: "llama3-8b-8192",
       temperature: 0.7,
       top_p: 0.9,
@@ -81,79 +50,71 @@ async function handleApiRequest(prompt, examples) {
     const [seconds, nanoseconds] = process.hrtime(startTime);
     const responseTime = (seconds * 1000 + nanoseconds / 1e6).toFixed(2);
 
+    const botReply = completion.choices[0].message.content;
+
+    // Save interaction to history for future context
+    conversationHistory.push({ role: "user", content: prompt });
+    conversationHistory.push({ role: "assistant", content: botReply });
+
     return {
       success: true,
-      data: completion.choices[0].message.content,
-      responseTime: responseTime,
+      data: botReply,
+      responseTime,
       tokensUsed: completion.usage?.total_tokens || "N/A",
     };
   } catch (error) {
-    console.error("API Error:", error.message);
     return {
       success: false,
       error: error.message,
-      responseTime: null,
     };
   }
 }
 
+// Main loop
 async function run() {
-  try {
-    let totalRequests = 0;
-    let totalResponseTime = 0;
+  console.log("Dynamic Prompting Chat - Type 'exit' to quit.\n");
 
-    // Get examples from user first
-    const examples = await getExamples();
-    console.log("\nExample conversations set up successfully!");
+  let totalRequests = 0;
+  let totalResponseTime = 0;
 
-    while (true) {
-      // Get prompt from user
-      const prompt = await new Promise((resolve) => {
-        rl.question("\nEnter your prompt (or 'exit' to quit): ", resolve);
-      });
+  while (true) {
+    const prompt = await new Promise((resolve) => {
+      rl.question("You: ", resolve);
+    });
 
-      // Check if user wants to exit
-      if (prompt.toLowerCase() === "exit") {
-        // Print statistics before exiting
-        if (totalRequests > 0) {
-          console.log("\nSession Statistics:");
-          console.log(`Total Requests: ${totalRequests}`);
-          console.log(
-            `Average Response Time: ${(
-              totalResponseTime / totalRequests
-            ).toFixed(2)}ms`
-          );
-        }
-        rl.close();
-        break;
+    if (prompt.toLowerCase() === "exit") {
+      if (totalRequests > 0) {
+        console.log("\nSession Statistics:");
+        console.log(`Total Requests: ${totalRequests}`);
+        console.log(
+          `Average Response Time: ${(totalResponseTime / totalRequests).toFixed(
+            2
+          )}ms`
+        );
       }
-
-      try {
-        // Validate prompt
-        const validatedPrompt = validatePrompt(prompt);
-        console.log("\nGenerating response...");
-
-        // Make API request and measure performance
-        const result = await handleApiRequest(validatedPrompt, examples);
-
-        if (result.success) {
-          console.log("\nResponse:", result.data);
-          console.log(`\nResponse Time: ${result.responseTime}ms`);
-          console.log(`Tokens Used: ${result.tokensUsed}`);
-
-          // Update statistics
-          totalRequests++;
-          totalResponseTime += parseFloat(result.responseTime);
-        } else {
-          console.error("\nError:", result.error);
-        }
-      } catch (validationError) {
-        console.error("\nValidation Error:", validationError.message);
-      }
+      rl.close();
+      break;
     }
-  } catch (error) {
-    console.error("Fatal Error:", error);
-    rl.close();
+
+    try {
+      const validatedPrompt = validatePrompt(prompt);
+
+      console.log("\nGenerating response...");
+      const result = await handleApiRequest(validatedPrompt);
+
+      if (result.success) {
+        console.log(`Assistant: ${result.data}`);
+        console.log(`\nResponse Time: ${result.responseTime}ms`);
+        console.log(`Tokens Used: ${result.tokensUsed}\n`);
+
+        totalRequests++;
+        totalResponseTime += parseFloat(result.responseTime);
+      } else {
+        console.error("\nError:", result.error);
+      }
+    } catch (err) {
+      console.error("\nValidation Error:", err.message);
+    }
   }
 }
 
