@@ -1,63 +1,46 @@
-## Chain of Thought Prompting
-Chain of thought prompting is the process of guiding an AI model to reason through problems step-by-step before producing a final answer. Instead of immediately giving a response, the AI first generates intermediate reasoning steps — similar to showing its “thought process” — which leads to more accurate, logical, and explainable conclusions.
+## Tokens and Tokenization:
+## What Are Tokens?
+Tokens are the small units of text that AI and NLP systems operate on—such as words, subwords, characters, or even punctuation—created by splitting raw text so models can process it numerically. In large language models (LLMs), tokenization determines how text is segmented and directly affects input limits, efficiency, and how well models handle rare or novel words.
 
-This technique works by explicitly instructing the AI to think aloud (internally or visibly) so it can break down complex tasks into smaller steps. In many cases, the reasoning is hidden from the final user output, but it influences how the model arrives at its conclusion.
+## What Is Tokenization?
+Tokenization is the process of breaking text into tokens according to rules or learned patterns so it can be converted into numerical representations for downstream tasks like classification, translation, and generation. It is a foundational step in the NLP pipeline and precedes embeddings and model inference.
 
-Unlike simple instruction prompting, which asks for a direct answer in one go, chain of thought prompting encourages structured reasoning that mimics human problem-solving.
+“Tokenization is the task of chopping [text] up into pieces, called tokens, perhaps at the same time throwing away certain characters, such as punctuation.”
 
-## Why use it?
-Improves accuracy for multi-step reasoning tasks
+## Why Use Tokenization?
+Enables models to accept and process text by converting it into structured units that can be embedded as numbers.
 
-Helps the model handle logic, math, and complex decision trees
+Improves robustness to unknown words, typos, and multilingual text when using subword methods.
 
-Reduces likelihood of skipping steps or making leaps in reasoning
+Reduces vocabulary size while maintaining coverage of rare words by decomposing them into known subpieces.
 
-Can make model’s decision process more explainable (when reasoning is shown) 
+Provides consistent inputs for tasks like sentiment analysis, text classification, and machine translation.
 
-## Example 1 — Basic Reasoning Chain
-Prompt:
-"You have 3 apples, you buy 2 more, and then eat 1. How many apples are left? Show your reasoning."
+## Common Tokenization Methods
+Word tokenization: Splits on whitespace or punctuation; fewer tokens but struggles with unknown words and languages without spaces.
 
-AI (Chain of Thought):
+## Character tokenization: 
+Splits into individual characters; robust but creates many tokens, increasing compute.
 
-Start with 3 apples.
+## Subword tokenization: 
+Splits words into frequent chunks to balance vocabulary size and coverage; standard for modern LLMs.
 
-Buy 2 more → total becomes 5 apples.
+## How Are Tokens Created?
+Preprocessing/normalization: Clean or normalize text (lowercasing, Unicode normalization, handling punctuation) depending on tokenizer design.
 
-Eat 1 apple → total becomes 4 apples.
-Answer: You have 4 apples left.
+## Tokenize new text:
 
-## Example 2 — Hidden Reasoning Steps
-Prompt to AI:
-"Reason step-by-step, then only show the final answer: 15×4 + 30 ÷ 5"
+Apply pre-tokenization (optional) to split by spaces/punctuation (BPE/WordPiece) or operate on raw byte stream including spaces (SentencePiece).
 
-AI Internal Reasoning (hidden):
+Greedily match the longest subwords from the vocabulary to segment text into tokens.
 
-15×4 = 60
+Convert tokens to IDs: Map tokens to integer IDs for model input.
 
-30 ÷ 5 = 6
+## Where Are Tokens Used?
+LLM inputs/outputs: All prompts and completions are sequences of token IDs, bounded by model token limits.
 
-60 + 6 = 66
-Output to User: 66
+Text classification and sentiment analysis: Tokenization feeds models consistent units for feature extraction and embeddings.
 
-## Example 3 — Complex Problem-Solving
-Prompt:
-"A train travels 60 km in 1.5 hours. Then it takes a 30-minute break, and continues for another 120 km in 2 hours. What is the average speed for the trip? Show your reasoning."
+Machine translation and summarization: Subword tokenization helps capture morphology and reduces out-of-vocabulary errors.
 
-## AI Reasoning:
-
-First leg speed: 60 km ÷ 1.5 h = 40 km/h
-
-Second leg speed: 120 km ÷ 2 h = 60 km/h
-
-Total distance = 60 + 120 = 180 km
-
-Total travel time = 1.5 h + 0.5 h (break) + 2 h = 4 hours
-
-Average speed = 180 km ÷ 4 h = 45 km/h
-Answer: 45 km/h
-
-
-Chain of Thought Prompting = Explicit instruction to think step-by-step → AI generates intermediate reasoning → Produces a final, more accurate answer
-
-
+Information retrieval and search: Tokenization enables indexing and matching at appropriate granularities.
