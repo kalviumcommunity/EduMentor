@@ -1,46 +1,46 @@
-## Tokens and Tokenization:
-## What Are Tokens?
-Tokens are the small units of text that AI and NLP systems operate on—such as words, subwords, characters, or even punctuation—created by splitting raw text so models can process it numerically. In large language models (LLMs), tokenization determines how text is segmented and directly affects input limits, efficiency, and how well models handle rare or novel words.
+## What Is Temperature?
 
-## What Is Tokenization?
-Tokenization is the process of breaking text into tokens according to rules or learned patterns so it can be converted into numerical representations for downstream tasks like classification, translation, and generation. It is a foundational step in the NLP pipeline and precedes embeddings and model inference.
+Temperature is a parameter in large language models (LLMs) that controls the randomness of the model’s output. It influences how likely the model is to pick less probable words during generation, thereby affecting creativity vs. consistency.
 
-“Tokenization is the task of chopping [text] up into pieces, called tokens, perhaps at the same time throwing away certain characters, such as punctuation.”
+Mathematically, temperature scales the logits (raw model outputs) before applying the softmax function, altering the probability distribution of the next token selection.
 
-## Why Use Tokenization?
-Enables models to accept and process text by converting it into structured units that can be embedded as numbers.
+Low temperatures make the model more deterministic (reliable but repetitive), while high temperatures make it more creative (diverse but possibly less accurate).
 
-Improves robustness to unknown words, typos, and multilingual text when using subword methods.
+## Why Use Temperature?
 
-Reduces vocabulary size while maintaining coverage of rare words by decomposing them into known subpieces.
+Temperature lets you fine-tune the trade-off between predictability and creativity depending on your task.
 
-Provides consistent inputs for tasks like sentiment analysis, text classification, and machine translation.
+Low Temperature (e.g., 0.1–0.3)
+Best for factual tasks, code generation, or consistent style — the model sticks to the most probable words.
 
-## Common Tokenization Methods
-Word tokenization: Splits on whitespace or punctuation; fewer tokens but struggles with unknown words and languages without spaces.
+Medium Temperature (e.g., 0.5–0.8)
+Balanced approach for general conversation, storytelling, and mixed tasks.
 
-## Character tokenization: 
-Splits into individual characters; robust but creates many tokens, increasing compute.
+High Temperature (e.g., 0.9–1.5)
+Encourages diversity, novelty, and unexpected responses — useful for brainstorming, poetry, or creative writing.
 
-## Subword tokenization: 
-Splits words into frequent chunks to balance vocabulary size and coverage; standard for modern LLMs.
+## How Temperature Works
 
-## How Are Tokens Created?
-Preprocessing/normalization: Clean or normalize text (lowercasing, Unicode normalization, handling punctuation) depending on tokenizer design.
+When predicting the next token, an LLM assigns probabilities to all possible tokens.
+Temperature scales these probabilities:
 
-## Tokenize new text:
+Compute logits for each possible token.
 
-Apply pre-tokenization (optional) to split by spaces/punctuation (BPE/WordPiece) or operate on raw byte stream including spaces (SentencePiece).
+Divide logits by the temperature.
 
-Greedily match the longest subwords from the vocabulary to segment text into tokens.
+If T < 1, differences between probabilities get amplified, making high-probability tokens even more likely.
 
-Convert tokens to IDs: Map tokens to integer IDs for model input.
+If T > 1, probabilities flatten, giving rare tokens a higher chance.
 
-## Where Are Tokens Used?
-LLM inputs/outputs: All prompts and completions are sequences of token IDs, bounded by model token limits.
+Apply softmax to get a new probability distribution.
 
-Text classification and sentiment analysis: Tokenization feeds models consistent units for feature extraction and embeddings.
+Sample the next token from this adjusted distribution.
 
-Machine translation and summarization: Subword tokenization helps capture morphology and reduces out-of-vocabulary errors.
 
-Information retrieval and search: Tokenization enables indexing and matching at appropriate granularities.
+## When to Adjust Temperature
+
+Lower it for tasks that require accuracy, repeatability, and minimal hallucination.
+
+Increase it when you want more diverse or imaginative outputs.
+
+Keep it task-specific — one size does not fit all.
