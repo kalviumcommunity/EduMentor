@@ -32,47 +32,43 @@ function validatePrompt(prompt) {
 // Store conversation dynamically
 const conversationHistory = [];
 
-// Chain of Thought helper to structure the reasoning process
-function constructChainOfThoughtPrompt(userPrompt) {
-  return `Let's solve this step by step:
-
-Problem: ${userPrompt}
-
-Let's think about this systematically:
-
-1. Initial Understanding:
-   - What is the core question?
-   - What are we trying to achieve?
-
-2. Key Components:
-   - What are the important elements to consider?
-   - What information do we have?
-   - What information do we need?
-
-3. Solution Strategy:
-   - What methods can we use?
-   - What are the potential approaches?
-   - Which approach is most suitable?
-
-4. Step-by-Step Solution:
-   - [Detailed steps will be provided here]
-
-5. Verification:
-   - Is our solution complete?
-   - Does it address all aspects of the problem?
-   - What are potential edge cases?
-
-Based on this analysis, here's the detailed solution:`;
+/**
+ * Detect if the user wants creative writing (story/poem/etc.)
+ */
+function isCreativeRequest(text) {
+  return /\b(story|short story|narrative|fiction|tale|fable|bedtime|poem|poetry|novella|scene|screenplay|creative writing|write.*story)\b/i.test(
+    text
+  );
 }
 
-// Extract reasoning steps from the response
-function extractReasoningSteps(response) {
-  const steps = response
-    .split("\n")
-    .filter((line) =>
-      line.trim().match(/^\d+\.|\bStep\b|\bReasoning\b|\bAnalysis\b/i)
-    );
-  return steps;
+/**
+ * Build task-aware prompts:
+ * - For creative requests: output ONLY the story (no outlines or analysis).
+ * - For other requests: concise answer, minimal steps, no chain-of-thought.
+ */
+function constructPrompt(userPrompt) {
+  if (isCreativeRequest(userPrompt)) {
+    return {
+      system:
+        "You are an award-winning fiction writer. For creative requests, output ONLY the final narrative text. Do not include analysis, outlines, steps, headings, or meta commentary.",
+      user:
+        `Write a complete short story based on this request:\n"${userPrompt}"\n\n` +
+        "Requirements:\n" +
+        "- 350–600 words\n" +
+        "- Past tense, single point of view\n" +
+        "- Show, don't tell; vivid sensory detail\n" +
+        "- Clear arc: setup → conflict → resolution\n" +
+        "- No lists, no bullet points, no headings, no step-by-step notes\n" +
+        "- Output ONLY the story text",
+    };
+  }
+
+  // Non-creative default: direct, helpful, no chain-of-thought.
+  return {
+    system:
+      "You are a concise, helpful assistant. Provide the answer directly. Include only the minimal reasoning or steps strictly needed. Do NOT reveal chain-of-thought; avoid phrases like 'let's think step by step'.",
+    user: userPrompt,
+  };
 }
 
 // Function to handle API request
@@ -80,16 +76,18 @@ async function handleApiRequest(prompt) {
   const startTime = process.hrtime();
 
   try {
-    // Construct chain of thought prompt
-    const chainOfThoughtPrompt = constructChainOfThoughtPrompt(prompt);
+    const { system, user } = constructPrompt(prompt);
+
+    const messages = [
+      { role: "system", content: system },
+      ...conversationHistory,
+      { role: "user", content: user },
+    ];
 
     const completion = await groq.chat.completions.create({
-      messages: [
-        ...conversationHistory,
-        { role: "user", content: chainOfThoughtPrompt },
-      ],
+      messages,
       model: "llama3-8b-8192",
-      temperature: 0.7,
+      temperature: parseFloat(process.env.LLM_TEMPERATURE) || 0.9, // remains configurable via .env
       top_p: 0.9,
       max_tokens: 1024,
       stream: false,
@@ -99,7 +97,7 @@ async function handleApiRequest(prompt) {
     const [seconds, nanoseconds] = process.hrtime(startTime);
     const responseTime = (seconds * 1000 + nanoseconds / 1e6).toFixed(2);
 
-    const botReply = completion.choices[0].message.content;
+    const botReply = completion.choices?.[0]?.message?.content?.trim() || "";
 
     // Save interaction to history for future context
     conversationHistory.push({ role: "user", content: prompt });
@@ -121,12 +119,11 @@ async function handleApiRequest(prompt) {
 
 // Main loop
 async function run() {
-  console.log("Chain of Thought Reasoning Assistant - Type 'exit' to quit.\n");
-  console.log("I'll help break down complex problems step by step.\n");
+  console.log("Creative & Concise Assistant - Type 'exit' to quit.\n");
+  console.log("Ask for a story to get a clean narrative, or any question for a direct answer.\n");
 
   let totalRequests = 0;
   let totalResponseTime = 0;
-  let totalReasoningSteps = 0;
 
   while (true) {
     const prompt = await new Promise((resolve) => {
@@ -138,9 +135,7 @@ async function run() {
         console.log("\nSession Statistics:");
         console.log(`Total Requests: ${totalRequests}`);
         console.log(
-          `Average Response Time: ${(totalResponseTime / totalRequests).toFixed(
-            2
-          )}ms`
+          `Average Response Time: ${(totalResponseTime / totalRequests).toFixed(2)}ms`
         );
       }
       rl.close();
@@ -154,8 +149,8 @@ async function run() {
       const result = await handleApiRequest(validatedPrompt);
 
       if (result.success) {
-        console.log(`Assistant: ${result.data}`);
-        console.log(`\nResponse Time: ${result.responseTime}ms`);
+        console.log(`Assistant:\n${result.data}\n`);
+        console.log(`Response Time: ${result.responseTime}ms`);
         console.log(`Tokens Used: ${result.tokensUsed}\n`);
 
         totalRequests++;
