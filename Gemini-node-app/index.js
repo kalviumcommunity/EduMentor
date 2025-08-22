@@ -18,6 +18,29 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+// ---------- Configuration ----------
+
+// Default sampling parameters - can be overridden by environment variables
+const DEFAULT_CONFIG = {
+  temperature: 0.9,
+  topP: 0.9,
+  maxTokens: 1200,
+  model: "llama3-8b-8192",
+};
+
+// Load configuration from environment variables with fallbacks
+function loadConfig() {
+  return {
+    temperature:
+      parseFloat(process.env.LLM_TEMPERATURE) || DEFAULT_CONFIG.temperature,
+    topP: parseFloat(process.env.LLM_TOP_P) || DEFAULT_CONFIG.topP,
+    maxTokens: parseInt(process.env.LLM_MAX_TOKENS) || DEFAULT_CONFIG.maxTokens,
+    model: process.env.LLM_MODEL || DEFAULT_CONFIG.model,
+  };
+}
+
+let currentConfig = loadConfig();
+
 // ---------- Utils ----------
 
 function validatePrompt(prompt) {
@@ -28,6 +51,24 @@ function validatePrompt(prompt) {
     throw new Error("Prompt is too long (max 2000 characters)");
   }
   return prompt.trim();
+}
+
+function validateTopP(value) {
+  const num = parseFloat(value);
+  if (isNaN(num) || num <= 0 || num > 1) {
+    throw new Error(
+      "Top P must be a number between 0 (exclusive) and 1 (inclusive)"
+    );
+  }
+  return num;
+}
+
+function validateTemperature(value) {
+  const num = parseFloat(value);
+  if (isNaN(num) || num < 0 || num > 2) {
+    throw new Error("Temperature must be a number between 0 and 2");
+  }
+  return num;
 }
 
 function isCreativeRequest(text) {
@@ -42,6 +83,55 @@ function wantsStructuredOutput(text) {
     /as\s+json\b/i.test(text) ||
     /structured\s+output/i.test(text)
   );
+}
+
+function isConfigCommand(text) {
+  return /^\/config\b/i.test(text) || /^\/set\b/i.test(text);
+}
+
+function parseConfigCommand(text) {
+  // Handle commands like:
+  // /config top_p 0.8
+  // /set temperature 1.2
+  // /config show
+  const parts = text.trim().split(/\s+/);
+  const command = parts[0].toLowerCase();
+
+  if (
+    parts.length === 2 &&
+    (parts[1].toLowerCase() === "show" || parts[1].toLowerCase() === "status")
+  ) {
+    return { action: "show" };
+  }
+
+  if (parts.length === 3) {
+    const param = parts[1].toLowerCase();
+    const value = parts[2];
+
+    if (param === "top_p" || param === "topp") {
+      return { action: "set", param: "topP", value: validateTopP(value) };
+    } else if (param === "temperature" || param === "temp") {
+      return {
+        action: "set",
+        param: "temperature",
+        value: validateTemperature(value),
+      };
+    } else if (param === "max_tokens" || param === "tokens") {
+      const tokens = parseInt(value);
+      if (isNaN(tokens) || tokens < 1 || tokens > 4096) {
+        throw new Error("Max tokens must be between 1 and 4096");
+      }
+      return { action: "set", param: "maxTokens", value: tokens };
+    }
+  }
+
+  throw new Error(
+    "Invalid config command. Use: /config show, /config top_p <value>, /config temperature <value>, /config max_tokens <value>"
+  );
+}
+
+function stripConfigPrefix(text) {
+  return text.replace(/^\/(?:config|set)\b\s*/i, "");
 }
 
 function stripStructuredPrefix(text) {
@@ -69,6 +159,27 @@ function safeParseJSON(maybeJSON) {
     }
     throw new Error("Malformed JSON in response");
   }
+}
+
+// Adjust sampling parameters based on task type
+function getAdaptiveConfig(userPrompt, baseConfig) {
+  const creative = isCreativeRequest(userPrompt);
+  const structured = wantsStructuredOutput(userPrompt);
+
+  // Create a copy of the base config
+  const adaptiveConfig = { ...baseConfig };
+
+  if (structured) {
+    // For structured output, use lower temperature and top_p for more deterministic results
+    adaptiveConfig.temperature = Math.min(baseConfig.temperature, 0.3);
+    adaptiveConfig.topP = Math.min(baseConfig.topP, 0.8);
+  } else if (creative) {
+    // For creative tasks, ensure we have enough randomness
+    adaptiveConfig.temperature = Math.max(baseConfig.temperature, 0.7);
+    adaptiveConfig.topP = Math.max(baseConfig.topP, 0.85);
+  }
+
+  return adaptiveConfig;
 }
 
 // ---------- Schemas & Prompt Builders ----------
@@ -242,13 +353,16 @@ async function handleApiRequest(rawPrompt) {
       { role: "user", content: user },
     ];
 
-    // Prefer a JSON-enforcing response_format when in structured mode.
+    // Get adaptive configuration based on the task type
+    const adaptiveConfig = getAdaptiveConfig(cleanPrompt, currentConfig);
+
+    // Build request with dynamic sampling parameters
     const requestBody = {
       messages,
-      model: "llama3-8b-8192",
-      temperature: parseFloat(process.env.LLM_TEMPERATURE) || 0.9,
-      top_p: 0.9,
-      max_tokens: 1200,
+      model: adaptiveConfig.model,
+      temperature: adaptiveConfig.temperature,
+      top_p: adaptiveConfig.topP,
+      max_tokens: adaptiveConfig.maxTokens,
       stream: false,
     };
 
@@ -296,6 +410,11 @@ async function handleApiRequest(rawPrompt) {
       data,
       responseTime,
       tokensUsed: completion.usage?.total_tokens || "N/A",
+      samplingParams: {
+        temperature: adaptiveConfig.temperature,
+        topP: adaptiveConfig.topP,
+        maxTokens: adaptiveConfig.maxTokens,
+      },
     };
   } catch (error) {
     return {
@@ -305,12 +424,53 @@ async function handleApiRequest(rawPrompt) {
   }
 }
 
+// ---------- Configuration Handler ----------
+
+function handleConfigCommand(configCmd) {
+  try {
+    const parsed = parseConfigCommand(configCmd);
+
+    if (parsed.action === "show") {
+      console.log("\nCurrent Configuration:");
+      console.log(`Temperature: ${currentConfig.temperature}`);
+      console.log(`Top P: ${currentConfig.topP}`);
+      console.log(`Max Tokens: ${currentConfig.maxTokens}`);
+      console.log(`Model: ${currentConfig.model}`);
+      console.log(
+        "\nAdaptive Sampling: Enabled (parameters adjust based on task type)"
+      );
+      console.log(
+        "- Structured tasks: Lower temperature/top_p for deterministic results"
+      );
+      console.log(
+        "- Creative tasks: Higher temperature/top_p for diverse outputs\n"
+      );
+      return { success: true };
+    }
+
+    if (parsed.action === "set") {
+      const oldValue = currentConfig[parsed.param];
+      currentConfig[parsed.param] = parsed.value;
+      console.log(`\nUpdated ${parsed.param}: ${oldValue} → ${parsed.value}\n`);
+      return { success: true };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 // ---------- CLI Main Loop ----------
 
 async function run() {
-  console.log("Structured Output Assistant - Type 'exit' to quit.\n");
+  console.log("Enhanced Structured Output Assistant - Type 'exit' to quit.\n");
+  console.log("Commands:");
+  console.log("  /json <prompt>     - Get structured JSON output");
+  console.log("  /config show       - Display current sampling parameters");
+  console.log("  /config top_p 0.8  - Set Top P nucleous sampling (0-1)");
+  console.log("  /config temp 1.2   - Set temperature (0-2)");
+  console.log("  /config tokens 800 - Set max tokens (1-4096)");
   console.log(
-    "Tip: Prefix your prompt with '/json' for structured JSON output.\n"
+    "\nAdaptive Sampling: Parameters auto-adjust based on task type\n"
   );
 
   let totalRequests = 0;
@@ -335,6 +495,15 @@ async function run() {
       break;
     }
 
+    // Handle configuration commands
+    if (isConfigCommand(prompt)) {
+      const result = handleConfigCommand(prompt);
+      if (!result.success) {
+        console.error("\nConfig Error:", result.error);
+      }
+      continue;
+    }
+
     try {
       const validatedPrompt = validatePrompt(prompt);
 
@@ -349,7 +518,10 @@ async function run() {
           console.log(`Assistant:\n${result.data}\n`);
         }
         console.log(`Response Time: ${result.responseTime}ms`);
-        console.log(`Tokens Used: ${result.tokensUsed}\n`);
+        console.log(`Tokens Used: ${result.tokensUsed}`);
+        console.log(
+          `Sampling - Temp: ${result.samplingParams.temperature}, Top-P: ${result.samplingParams.topP}\n`
+        );
 
         totalRequests++;
         totalResponseTime += parseFloat(result.responseTime);
