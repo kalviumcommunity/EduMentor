@@ -24,9 +24,10 @@ const groq = new Groq({
 const DEFAULT_CONFIG = {
   temperature: 0.9,
   topP: 0.9,
-  topK: 40, // 👈 Added default Top-K
+  topK: 40,
   maxTokens: 1200,
   model: "llama3-8b-8192",
+  stop: ["\nHuman:", "\nAI:"], // 👈 default stop sequences
 };
 
 // Load configuration from environment variables with fallbacks
@@ -35,9 +36,12 @@ function loadConfig() {
     temperature:
       parseFloat(process.env.LLM_TEMPERATURE) || DEFAULT_CONFIG.temperature,
     topP: parseFloat(process.env.LLM_TOP_P) || DEFAULT_CONFIG.topP,
-    topK: parseInt(process.env.LLM_TOP_K) || DEFAULT_CONFIG.topK, // 👈 Added
+    topK: parseInt(process.env.LLM_TOP_K) || DEFAULT_CONFIG.topK,
     maxTokens: parseInt(process.env.LLM_MAX_TOKENS) || DEFAULT_CONFIG.maxTokens,
     model: process.env.LLM_MODEL || DEFAULT_CONFIG.model,
+    stop: process.env.LLM_STOP
+      ? process.env.LLM_STOP.split(",").map((s) => s.trim())
+      : DEFAULT_CONFIG.stop,
   };
 }
 
@@ -81,6 +85,13 @@ function validateTemperature(value) {
   return num;
 }
 
+function validateStop(value) {
+  if (!value || value.trim().length === 0) {
+    throw new Error("Stop sequence cannot be empty");
+  }
+  return value.split(",").map((s) => s.trim());
+}
+
 function isCreativeRequest(text) {
   return /\b(story|short story|narrative|fiction|tale|fable|bedtime|poem|poetry|novella|scene|screenplay|creative writing|write.*story)\b/i.test(
     text
@@ -109,14 +120,14 @@ function parseConfigCommand(text) {
     return { action: "show" };
   }
 
-  if (parts.length === 3) {
+  if (parts.length >= 3) {
     const param = parts[1].toLowerCase();
-    const value = parts[2];
+    const value = parts.slice(2).join(" ");
 
     if (param === "top_p" || param === "topp") {
       return { action: "set", param: "topP", value: validateTopP(value) };
     } else if (param === "top_k" || param === "topk") {
-      return { action: "set", param: "topK", value: validateTopK(value) }; // 👈 Added
+      return { action: "set", param: "topK", value: validateTopK(value) };
     } else if (param === "temperature" || param === "temp") {
       return {
         action: "set",
@@ -129,20 +140,14 @@ function parseConfigCommand(text) {
         throw new Error("Max tokens must be between 1 and 4096");
       }
       return { action: "set", param: "maxTokens", value: tokens };
+    } else if (param === "stop") {
+      return { action: "set", param: "stop", value: validateStop(value) };
     }
   }
 
   throw new Error(
-    "Invalid config command. Use: /config show, /config top_p <value>, /config top_k <value>, /config temperature <value>, /config max_tokens <value>"
+    "Invalid config command. Use: /config show, /config top_p <val>, /config top_k <val>, /config temperature <val>, /config max_tokens <val>, /config stop <comma-separated values>"
   );
-}
-
-function stripConfigPrefix(text) {
-  return text.replace(/^\/(?:config|set)\b\s*/i, "");
-}
-
-function stripStructuredPrefix(text) {
-  return text.replace(/^\/json\b\s*/i, "");
 }
 
 // ---------- Adaptive Config ----------
@@ -155,11 +160,11 @@ function getAdaptiveConfig(userPrompt, baseConfig) {
   if (structured) {
     adaptiveConfig.temperature = Math.min(baseConfig.temperature, 0.3);
     adaptiveConfig.topP = Math.min(baseConfig.topP, 0.8);
-    adaptiveConfig.topK = Math.min(baseConfig.topK, 40); // 👈 structured = smaller K
+    adaptiveConfig.topK = Math.min(baseConfig.topK, 40);
   } else if (creative) {
     adaptiveConfig.temperature = Math.max(baseConfig.temperature, 0.7);
     adaptiveConfig.topP = Math.max(baseConfig.topP, 0.85);
-    adaptiveConfig.topK = Math.max(baseConfig.topK, 100); // 👈 creative = larger K
+    adaptiveConfig.topK = Math.max(baseConfig.topK, 100);
   }
 
   return adaptiveConfig;
@@ -174,18 +179,13 @@ async function handleApiRequest(rawPrompt) {
   try {
     const structured = wantsStructuredOutput(rawPrompt);
     const cleanPrompt = structured
-      ? stripStructuredPrefix(rawPrompt)
+      ? rawPrompt.replace(/^\/json\b\s*/i, "")
       : rawPrompt;
 
-    const { system, user, jsonSchema } = constructPrompt(
-      cleanPrompt,
-      structured
-    );
-
     const messages = [
-      { role: "system", content: system },
+      { role: "system", content: "You are a helpful assistant." },
       ...conversationHistory,
-      { role: "user", content: user },
+      { role: "user", content: cleanPrompt },
     ];
 
     const adaptiveConfig = getAdaptiveConfig(cleanPrompt, currentConfig);
@@ -195,7 +195,8 @@ async function handleApiRequest(rawPrompt) {
       model: adaptiveConfig.model,
       temperature: adaptiveConfig.temperature,
       top_p: adaptiveConfig.topP,
-      top_k: adaptiveConfig.topK, // 👈 Added Top-K
+      top_k: adaptiveConfig.topK,
+      stop: currentConfig.stop, // 👈 Stop sequences included
       max_tokens: adaptiveConfig.maxTokens,
       stream: false,
     };
@@ -211,38 +212,19 @@ async function handleApiRequest(rawPrompt) {
 
     const raw = completion.choices?.[0]?.message?.content?.trim() || "";
 
-    let data = raw;
-    let structuredOk = false;
-
-    if (structured) {
-      const parsed = safeParseJSON(raw);
-      const required = (jsonSchema && jsonSchema.required) || [];
-      const missing = required.filter((k) => !(k in parsed));
-      if (missing.length) {
-        throw new Error(
-          `Structured output missing required keys: ${missing.join(", ")}`
-        );
-      }
-      data = parsed;
-      structuredOk = true;
-    }
-
     conversationHistory.push({ role: "user", content: cleanPrompt });
-    conversationHistory.push({
-      role: "assistant",
-      content: structured ? JSON.stringify(data) : data,
-    });
+    conversationHistory.push({ role: "assistant", content: raw });
 
     return {
       success: true,
-      structured: structuredOk,
-      data,
+      data: raw,
       responseTime,
       tokensUsed: completion.usage?.total_tokens || "N/A",
       samplingParams: {
         temperature: adaptiveConfig.temperature,
         topP: adaptiveConfig.topP,
-        topK: adaptiveConfig.topK, // 👈 Added
+        topK: adaptiveConfig.topK,
+        stop: currentConfig.stop,
         maxTokens: adaptiveConfig.maxTokens,
       },
     };
@@ -260,7 +242,8 @@ function handleConfigCommand(configCmd) {
       console.log("\nCurrent Configuration:");
       console.log(`Temperature: ${currentConfig.temperature}`);
       console.log(`Top P: ${currentConfig.topP}`);
-      console.log(`Top K: ${currentConfig.topK}`); // 👈 show Top-K
+      console.log(`Top K: ${currentConfig.topK}`);
+      console.log(`Stop Sequences: ${currentConfig.stop.join(", ")}`);
       console.log(`Max Tokens: ${currentConfig.maxTokens}`);
       console.log(`Model: ${currentConfig.model}`);
       return { success: true };
@@ -279,22 +262,27 @@ function handleConfigCommand(configCmd) {
 
 // ---------- CLI ----------
 async function run() {
-  console.log("Enhanced Structured Output Assistant - Type 'exit' to quit.\n");
+  console.log(
+    "Enhanced Assistant with Stop Sequences - Type 'exit' to quit.\n"
+  );
   console.log("Commands:");
-  console.log("  /json <prompt>     - Get structured JSON output");
-  console.log("  /config show       - Display current sampling parameters");
-  console.log("  /config top_p 0.8  - Set Top-P (0-1)");
-  console.log("  /config top_k 50   - Set Top-K (1-1000)"); // 👈 new
-  console.log("  /config temp 1.2   - Set temperature (0-2)");
-  console.log("  /config tokens 800 - Set max tokens (1-4096)\n");
+  console.log("  /json <prompt>        - Get structured JSON output");
+  console.log("  /config show          - Display current sampling parameters");
+  console.log("  /config top_p 0.8     - Set Top-P (0-1)");
+  console.log("  /config top_k 50      - Set Top-K (1-1000)");
+  console.log("  /config temp 1.2      - Set temperature (0-2)");
+  console.log("  /config tokens 800    - Set max tokens (1-4096)");
+  console.log(
+    "  /config stop END,###  - Set stop sequences (comma separated)\n"
+  );
 
   let totalRequests = 0;
   let totalResponseTime = 0;
 
   while (true) {
-    const prompt = await new Promise((resolve) => {
-      rl.question("You: ", resolve);
-    });
+    const prompt = await new Promise((resolve) =>
+      rl.question("You: ", resolve)
+    );
 
     if (prompt.toLowerCase() === "exit") {
       if (totalRequests > 0) {
@@ -312,9 +300,7 @@ async function run() {
 
     if (isConfigCommand(prompt)) {
       const result = handleConfigCommand(prompt);
-      if (!result.success) {
-        console.error("\nConfig Error:", result.error);
-      }
+      if (!result.success) console.error("\nConfig Error:", result.error);
       continue;
     }
 
@@ -324,16 +310,15 @@ async function run() {
       const result = await handleApiRequest(validatedPrompt);
 
       if (result.success) {
-        if (result.structured) {
-          console.log("Assistant (Structured JSON):");
-          console.log(JSON.stringify(result.data, null, 2));
-        } else {
-          console.log(`Assistant:\n${result.data}\n`);
-        }
+        console.log(`Assistant:\n${result.data}\n`);
         console.log(`Response Time: ${result.responseTime}ms`);
         console.log(`Tokens Used: ${result.tokensUsed}`);
         console.log(
-          `Sampling - Temp: ${result.samplingParams.temperature}, Top-P: ${result.samplingParams.topP}, Top-K: ${result.samplingParams.topK}\n`
+          `Sampling - Temp: ${result.samplingParams.temperature}, Top-P: ${
+            result.samplingParams.topP
+          }, Top-K: ${
+            result.samplingParams.topK
+          }, Stop: ${result.samplingParams.stop.join(" | ")}\n`
         );
 
         totalRequests++;
